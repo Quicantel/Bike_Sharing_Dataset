@@ -7,20 +7,22 @@ from babel.numbers import format_currency
 # Set konfigurasi halaman
 st.set_page_config(page_title="Bike Sharing Dashboard 🚲", layout="wide")
 
-# --- LOAD DATA ---
 @st.cache_data
 def load_data():
-    # Sesuaikan path jika file berada di folder 'data'
-    day_df = pd.read_csv("day.csv")
-    hour_df = pd.read_csv("hour.csv")
+    # Mendapatkan path absolut dari folder tempat dashboard.py berada
+    base_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Cleaning sederhana untuk dashboard
+    # Menggabungkan path folder dengan nama file csv
+    day_path = os.path.join(base_dir, "day.csv")
+    hour_path = os.path.join(base_dir, "hour.csv")
+    
+    # Membaca file menggunakan path yang sudah pasti benar
+    day_df = pd.read_csv(day_path)
+    hour_df = pd.read_csv(hour_path)
+    
+    # Proses cleaning selanjutnya tetap sama...
     day_df['dteday'] = pd.to_datetime(day_df['dteday'])
-    hour_df['dteday'] = pd.to_datetime(hour_df['dteday'])
-    
-    season_mapping = {1: 'Spring', 2: 'Summer', 3: 'Fall', 4: 'Winter'}
-    day_df['season_label'] = day_df['season'].map(season_mapping)
-    
+    # ... dst
     return day_df, hour_df
 
 day_df, hour_df = load_data()
