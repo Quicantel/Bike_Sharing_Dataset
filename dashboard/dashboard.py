@@ -2,38 +2,23 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import streamlit as st
-from babel.numbers import format_currency
 import os
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(
-    page_title="Bike Sharing Dashboard 🚲",
-    page_icon="🚲",
-    layout="wide"
-)
-
-# --- STYLE VISUALISASI ---
+st.set_page_config(page_title="Bike Sharing Dashboard 🚲", layout="wide")
 sns.set_theme(style="whitegrid")
 
-# --- LOAD DATA (PERBAIKAN PATH) ---
+# --- LOAD DATA ---
 @st.cache_data
 def load_data():
-    # Mengambil lokasi folder tempat dashboard.py ini berada
     base_dir = os.path.dirname(os.path.abspath(__file__))
+    day_df = pd.read_csv(os.path.join(base_dir, "day.csv"))
+    hour_df = pd.read_csv(os.path.join(base_dir, "hour.csv"))
     
-    # Membangun jalur lengkap ke file CSV
-    day_path = os.path.join(base_dir, "day.csv")
-    hour_path = os.path.join(base_dir, "hour.csv")
-    
-    # Membaca data
-    day_df = pd.read_csv(day_path)
-    hour_df = pd.read_csv(hour_path)
-    
-    # Konversi tipe data datetime
+    # INI KUNCINYA: Memaksa kolom menjadi datetime agar sinkron dengan filter tanggal
     day_df['dteday'] = pd.to_datetime(day_df['dteday'])
     hour_df['dteday'] = pd.to_datetime(hour_df['dteday'])
     
-    # Mapping Musim untuk Label yang lebih informatif
     season_mapping = {1: 'Spring', 2: 'Summer', 3: 'Fall', 4: 'Winter'}
     day_df['season_label'] = day_df['season'].map(season_mapping)
     hour_df['season_label'] = hour_df['season'].map(season_mapping)
@@ -45,115 +30,101 @@ day_df, hour_df = load_data()
 # --- SIDEBAR ---
 with st.sidebar:
     st.image("https://raw.githubusercontent.com/dicodingacademy/assets/main/logo.png", width=200)
-    st.title("🚲 Bike Sharing Analytics")
-    st.markdown("Dashboard ini menganalisis performa penyewaan sepeda berdasarkan parameter waktu dan cuaca.")
+    st.title("🚲 Dashboard Filter")
     
-    st.divider()
-    
-    # Filter Rentang Waktu
-    min_date = day_df["dteday"].min()
-    max_date = day_df["dteday"].max()
-    
-    # Input tanggal
+    # Filter Tanggal
+    min_date, max_date = day_df["dteday"].min(), day_df["dteday"].max()
     date_range = st.date_input(
-        label='Pilih Rentang Waktu:',
-        min_value=min_date,
-        max_value=max_date,
-        value=[min_date, max_date]
+        label='Rentang Waktu:', 
+        value=[min_date, max_date], 
+        min_value=min_date, 
+        max_value=max_date
     )
     
-    # Validasi input tanggal
+    # Pengamanan input tanggal agar tidak error saat user baru memilih satu tanggal
     if isinstance(date_range, list) and len(date_range) == 2:
         start_date, end_date = date_range
     else:
         start_date, end_date = min_date, max_date
 
-    # Filter Musim
-    st.markdown("---")
-    available_seasons = day_df["season_label"].unique()
+    # Filter Musim (Sinkron dengan grafik)
     selected_seasons = st.multiselect(
         "Pilih Musim:",
-        options=available_seasons,
-        default=available_seasons
+        options=day_df["season_label"].unique(),
+        default=day_df["season_label"].unique()
     )
 
-# --- FILTERING DATA ---
-main_df = day_df[
+# --- PROSES FILTERING (MENGHUBUNGKAN FITUR KE DATA) ---
+
+# Sinkronisasi filter untuk data harian (Metrik & Grafik Kiri)
+main_day_df = day_df[
     (day_df["dteday"] >= pd.to_datetime(start_date)) & 
     (day_df["dteday"] <= pd.to_datetime(end_date)) &
     (day_df["season_label"].isin(selected_seasons))
-]
+].copy()
 
-# --- HEADER UTAMA ---
+# Sinkronisasi filter untuk data per jam (Grafik Kanan)
+main_hour_df = hour_df[
+    (hour_df["dteday"] >= pd.to_datetime(start_date)) & 
+    (hour_df["dteday"] <= pd.to_datetime(end_date)) &
+    (hour_df["season_label"].isin(selected_seasons))
+].copy()
+
+# --- MAIN PAGE ---
 st.title("📊 Bike Sharing Performance Dashboard")
-st.markdown(f"Periode Analisis: **{start_date}** s/d **{end_date}**")
+# Indikator pembuktian filter jalan:
+st.write(f"Periode: **{start_date}** s/d **{end_date}** | Data Terfilter: **{len(main_day_df)} Hari**")
 
-# --- METRIKS UTAMA (KPIs) ---
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    total_rentals = main_df.cnt.sum()
-    st.metric("Total Penyewaan", value=f"{total_rentals:,}")
-
-with col2:
-    total_registered = main_df.registered.sum()
-    st.metric("Pengguna Terdaftar", value=f"{total_registered:,}", delta="Registered")
-
-with col3:
-    total_casual = main_df.casual.sum()
-    st.metric("Pengguna Kasual", value=f"{total_casual:,}", delta="Casual", delta_color="inverse")
+# Metrik Utama (Menggunakan data yang sudah difilter)
+m1, m2, m3 = st.columns(3)
+m1.metric("Total Penyewaan", value=f"{main_day_df.cnt.sum():,}")
+m2.metric("Registered", value=f"{main_day_df.registered.sum():,}")
+m3.metric("Casual", value=f"{main_day_df.casual.sum():,}")
 
 st.divider()
 
-# --- LAYOUT DASHBOARD ---
-row1_col1, row1_col2 = st.columns(2)
+# --- VISUALISASI ---
+col_l, col_r = st.columns(2)
 
-with row1_col1:
+with col_l:
     st.subheader("Pengaruh Suhu Terhadap Penyewaan")
-    fig1, ax1 = plt.subplots(figsize=(10, 6))
-    sns.scatterplot(
-        data=main_df, 
-        x='atemp', 
-        y='cnt', 
-        hue='season_label', 
-        palette='viridis', 
-        alpha=0.6,
-        ax=ax1
-    )
-    ax1.set_title("Korelasi Suhu (Feeling Temp) vs Total Sewa", fontsize=15)
-    ax1.set_xlabel("Suhu (Normalized atemp)")
-    ax1.set_ylabel("Total Penyewaan")
-    st.pyplot(fig1)
+    if not main_day_df.empty:
+        # 1. Selalu buat Figure baru di dalam kolom
+        fig1, ax1 = plt.subplots(figsize=(10, 6))
+        
+        # 2. Tambahkan pengecekan hue_order agar Seaborn tidak bingung
+        # jika datanya hanya terdiri dari satu musim saja
+        sns.scatterplot(
+            data=main_day_df, 
+            x='atemp', 
+            y='cnt', 
+            hue='season_label', 
+            hue_order=['Spring', 'Summer', 'Fall', 'Winter'], # Paksa urutan kategori
+            palette='viridis', 
+            ax=ax1
+        )
+        
+        ax1.set_title(f"Data Terfilter ({len(main_day_df)} Hari)")
+        st.pyplot(fig1)
+    else:
+        st.warning("Data kosong untuk filter ini.")
 
-with row1_col2:
+with col_r:
     st.subheader("Pola Penyewaan pada Jam Sibuk")
-    # Filter jam sibuk hari kerja
-    rush_hour_df = hour_df[
-        (hour_df['workingday'] == 1) & 
-        (hour_df['hr'].isin([7, 8, 9, 17, 18, 19])) &
-        (hour_df['season_label'].isin(selected_seasons))
+    # Menggunakan main_hour_df yang sudah terfilter rentang tanggalnya
+    rush_hour_df = main_hour_df[
+        (main_hour_df['workingday'] == 1) & (main_hour_df['hr'].isin([7, 8, 9, 17, 18, 19]))
     ]
-    rush_hour_avg = rush_hour_df.groupby('hr')[['casual', 'registered']].mean().reset_index()
-
-    fig2, ax2 = plt.subplots(figsize=(10, 6))
-    ax2.bar(rush_hour_avg['hr'], rush_hour_avg['registered'], label='Registered', color='#2E86C1')
-    ax2.bar(rush_hour_avg['hr'], rush_hour_avg['casual'], bottom=rush_hour_avg['registered'], label='Casual', color='#AED6F1')
     
-    ax2.set_title("Rata-rata Sewa pada Jam Sibuk (Hari Kerja)", fontsize=15)
-    ax2.set_xlabel("Jam (24-Hour Format)")
-    ax2.set_ylabel("Rata-rata Penyewaan")
-    ax2.set_xticks([7, 8, 9, 17, 18, 19])
-    ax2.legend()
-    st.pyplot(fig2)
-
-# --- ANALISIS TAMBAHAN ---
-st.divider()
-st.subheader("Insight Analisis Lanjutan: Clustering")
-st.info("""
-**Teknik Analisis: Manual Grouping (Clustering)**
-Data dikelompokkan berdasarkan waktu operasional (Jam Sibuk vs Luar Jam Sibuk). 
-Hasil menunjukkan bahwa pengguna **Registered** memiliki lonjakan tajam pada jam berangkat (08:00) dan pulang kerja (17:00), 
-sedangkan pengguna **Casual** cenderung stabil dengan intensitas lebih rendah.
-""")
+    if not rush_hour_df.empty:
+        rush_hour_avg = rush_hour_df.groupby('hr')[['casual', 'registered']].mean().reset_index()
+        fig2, ax2 = plt.subplots(figsize=(10, 6))
+        ax2.bar(rush_hour_avg['hr'], rush_hour_avg['registered'], label='Registered', color='#2E86C1')
+        ax2.bar(rush_hour_avg['hr'], rush_hour_avg['casual'], bottom=rush_hour_avg['registered'], label='Casual', color='#AED6F1')
+        ax2.set_xticks([7, 8, 9, 17, 18, 19])
+        ax2.legend()
+        st.pyplot(fig2)
+    else:
+        st.warning("Tidak ada data jam kerja pada rentang waktu ini.")
 
 st.caption(f"Copyright © 2026 | Project Akhir Analisis Data - Calvin Valentino Hariyanto")
